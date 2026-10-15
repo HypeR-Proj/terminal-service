@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 roolrz
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+workspace = "../../app"
+name = "hyper-terminal-service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "hyper-terminal-service"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+hyper-os.workspace = true
+hyper-rt.workspace = true
+hyper-terminal = { path = "../../lib/terminal" }
+
+[lints]
+workspace = true
