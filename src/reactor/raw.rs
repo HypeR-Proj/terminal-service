@@ -17,7 +17,7 @@ impl Reactor {
         if self.input_flush.is_some() {
             return Ok(());
         }
-        let binary = self.terminal.settings().binary_input();
+        let binary = self.terminal.binary_input();
         let demand = if self.foreground == 0 {
             None
         } else if binary {

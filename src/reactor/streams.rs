@@ -153,7 +153,7 @@ impl Reactor {
                 } if connection.lease == self.foreground => {
                     let mut frame = [0; stream::MAX_FRAME];
                     let untouched =
-                        self.terminal.settings().binary_input() && !self.terminal.has_read_record();
+                        self.terminal.binary_input() && !self.terminal.has_read_record();
                     let decision = if untouched {
                         // Available samples the upstream raw FIFO once before
                         // reporting no data. A pending read never transfers

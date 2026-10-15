@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2026 roolrz
+# SPDX-License-Identifier: Apache-2.0
+# name, direction, settings delta, source, read data, output (hex; - is empty)
+erase	input	-	61627f0a	610a	61620820080d0a
+erase-nonvisual	input	-visual_erase	61627f0a	610a	61625e3f0d0a
+erase-nonvisual-no-caret	input	-visual_erase,-echo_controls	61627f0a	610a	61627f0d0a
+erase-empty	input	-	7f0a	0a	0d0a
+erase-tab	input	-	61097f0a	610a	6109080808080808080d0a
+erase-expanded-tab	input	+expand_tabs	61097f0a	610a	6120202020202020080808080808080d0a
+erase-control	input	-	61017f0a	610a	615e410820080820080d0a
+erase-control-no-caret	input	-echo_controls	61017f0a	610a	61010d0a
+erase-utf8	input	-	61c3a97f0a	610a	61c3a90820080d0a
+kill-visual	input	-	6162157a0a	7a0a	61620820080820087a0d0a
+kill-newline	input	-visual_kill	6162157a0a	7a0a	61625e550d0a7a0d0a
+kill-no-newline	input	-echo_kill_line	6162157a0a	7a0a	61625e557a0d0a
+kill-no-visual-erase	input	-visual_erase	6162157a0a	7a0a	61625e550d0a7a0d0a
+kill-empty	input	-visual_kill	157a0a	7a0a	7a0d0a
+kill-echo-off	input	-echo,+echo_newline,-visual_kill	6162157a0a	7a0a	0d0a
+word-punctuation	input	-	666f6f2f6261722120170a	666f6f2f0a	666f6f2f62617221200820080820080820080820080820080d0a
+word-underscore	input	-	6120666f6f5f62617220170a	61200a	6120666f6f5f626172200820080820080820080820080820080820080820080820080d0a
+word-nonvisual	input	-visual_erase	61206263170a	61200a	612062630820080820080d0a
+literal-cr	input	-	61160d7f0a	610a	615e085e4d0820080820080d0a
+literal-newline	input	-	160a0a	0a0a	5e085e4a0d0a
+literal-strip-lower	input	+strip_high_bit,+lowercase	16c10a	610a	5e08610d0a
+literal-flow	input	-	16130a	130a	5e085e530d0a
+reprint	input	-	6162120a	61620a	61625e520d0a61620d0a
+reprint-echo-off	input	-echo,+echo_newline	6162120a	6162120a	0d0a
+newline-noncanonical	input	-canonical,-echo,+echo_newline	610a	610a	-
+hardcopy-erase	input	+echo_erased	61627f630a	61630a	61625c622f630d0a
+hardcopy-erase-to-empty	input	+echo_erased	61627f7f0a	0a	61625c62612f0d0a
+hardcopy-kill	input	+echo_erased	6162150a	0a	61625c62612f0d0a
+noncanonical-controls	input	-canonical	15171612040a	15171612040a	5e555e575e565e525e445e4a
+ignore-cr	input	+ignore_cr	610d620a	61620a	61620d0a
+input-nonrecursive	input	+lf_to_cr	610a620d	610d620a	615e4d620d0a
+output-cr-precedence	output	+cr_to_lf,+suppress_cr_at_column_zero	0d610d0d	-	610a
+output-invisible-controls	output	+expand_tabs	6100071b7f09620a	-	6100071b7f20202020202020620d0a
+output-case	output	+uppercase	615a0d0ac3a9	-	415a0d0d0ac3a9
+output-nonrecursive	output	+cr_to_lf	610d0a	-	610a0d0a
+word-utf8-latin	input	-	666f6f20c3a9170a	666f6f200a	666f6f20c3a90820080d0a
+word-utf8-cjk	input	-	666f6f20e4b8ad170a	666f6f200a	666f6f20e4b8ad0820080d0a
+input-case-latin1	input	+lowercase	c0d6d7d8dedfff0a	e0f6d7f8fedfff0a	e0f6d7f8fedfff0d0a
+output-case-latin1	output	+uppercase	dfe0f6f7f8ff	-	bfc0d6f7d8df

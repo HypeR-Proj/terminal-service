@@ -18,9 +18,10 @@ use hyper_os::wait::{ObjectSignals, WaitItem, wait_many};
 use hyper_os::{Error, Result, Status};
 use hyper_terminal::client;
 use hyper_terminal::protocol;
-use hyper_terminal::{Discipline, EventFlags, Limits, ReadDecision, ReadRequest, Settings};
+use hyper_terminal::{EventFlags, Settings};
 
 use crate::admission::{self, ControlRequest, PreparedHandles, Publisher, Work};
+use crate::discipline::{Discipline, Limits, ReadDecision, ReadRequest};
 
 const MAX_LEASES: usize = 8;
 const MAX_CONNECTIONS: usize = 24;
@@ -292,10 +293,7 @@ impl Reactor {
         self.finish_raw()?;
         self.finish_input_flush()?;
         self.configure_progress(now)?;
-        if self.foreground != 0
-            && self.input_flush.is_none()
-            && !self.terminal.settings().binary_input()
-        {
+        if self.foreground != 0 && self.input_flush.is_none() && !self.terminal.binary_input() {
             self.feed_cooked_ingress(now);
         }
         let mut index = 0;

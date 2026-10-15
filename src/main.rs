@@ -4,7 +4,15 @@
 //! One formal Native terminal. Session policy and process creation live elsewhere.
 
 mod admission;
+mod discipline;
 mod reactor;
+
+#[cfg(test)]
+#[path = "../tests/discipline.rs"]
+mod discipline_tests;
+#[cfg(test)]
+#[path = "../tests/formatting.rs"]
+mod formatting_tests;
 
 use hyper_os::startup::Startup;
 
