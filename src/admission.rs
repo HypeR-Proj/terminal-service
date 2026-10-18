@@ -127,7 +127,7 @@ pub fn control_worker(
 ) -> Result<()> {
     let reservation = publisher.reserve_worker()?;
     std::thread::Builder::new()
-        .name("terminal-control".into())
+        .name(format!("terminal-control/{lease}"))
         .spawn(move || {
             let _reservation = reservation;
             let _closed = ClosedControl {
@@ -211,7 +211,7 @@ pub fn stream_worker(
 ) -> Result<()> {
     let reservation = publisher.reserve_worker()?;
     std::thread::Builder::new()
-        .name("terminal-stream".into())
+        .name(format!("terminal-stream/{lease}"))
         .spawn(move || {
             let _reservation = reservation;
             while alive.load(Ordering::Acquire) {
