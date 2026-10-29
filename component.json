@@ -42,5 +42,22 @@
       "app-test",
       "APP_TEST_PACKAGE=hyper-terminal-service"
     ]
-  ]
+  ],
+  "cargo_context": {
+    "Cargo.toml": {
+      "workspace": null,
+      "membership": "../../app",
+      "dependency_paths": {
+        "/dependencies/hyper-terminal": "lib/terminal"
+      },
+      "inherited_dependencies": {
+        "/dependencies/hyper-os": {
+          "workspace": true
+        },
+        "/dependencies/hyper-rt": {
+          "workspace": true
+        }
+      }
+    }
+  }
 }
