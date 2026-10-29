@@ -1,9 +1,7 @@
 # SPDX-FileCopyrightText: 2026 roolrz
 # SPDX-License-Identifier: Apache-2.0
 
-bin = [
-    { name = "hyper-terminal-service", path = "src/main.rs", bench = false },
-]
+bin = [{name = "hyper-terminal-service", path = "src/main.rs", bench = false}]
 
 [package]
 name = "hyper-terminal-service"
@@ -13,18 +11,22 @@ license = "Apache-2.0"
 repository = "https://github.com/HypeR-Proj/terminal-service"
 publish = false
 autotests = false
+workspace = "../../app"
+
+[dependencies]
 
 [dependencies.hyper-os]
-version = "=0.0.0"
+workspace = true
 
 [dependencies.hyper-rt]
-version = "=0.0.0"
-features = [
-    "std",
-]
+workspace = true
+features = ["std"]
 
 [dependencies.hyper-terminal]
 version = "=0.0.0"
+path = "../../lib/terminal"
+
+[lints]
 
 [lints.clippy]
 doc_markdown = "deny"
@@ -43,12 +45,4 @@ unsafe_op_in_unsafe_fn = "deny"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
-check-cfg = [
-    "cfg(target_os, values(\"hyper\"))",
-]
-
-[workspace]
-members = [
-    ".",
-]
-resolver = "3"
+check-cfg = ["cfg(target_os, values(\"hyper\"))"]
