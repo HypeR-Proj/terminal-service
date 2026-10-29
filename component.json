@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "name": "terminal-service",
+  "kind": "service",
+  "origin": {
+    "repository": "https://github.com/roolrz/HypeR",
+    "commit": "8d42d047058a2b58a291803700e86487fb723f7a"
+  },
+  "sources": {
+    "Cargo.toml": "svc/terminal-service/Cargo.toml",
+    "component.mk": "svc/terminal-service/component.mk",
+    "src/admission.rs": "svc/terminal-service/src/admission.rs",
+    "src/discipline.rs": "svc/terminal-service/src/discipline.rs",
+    "src/discipline/characters.rs": "svc/terminal-service/src/discipline/characters.rs",
+    "src/discipline/editing.rs": "svc/terminal-service/src/discipline/editing.rs",
+    "src/discipline/input.rs": "svc/terminal-service/src/discipline/input.rs",
+    "src/discipline/output.rs": "svc/terminal-service/src/discipline/output.rs",
+    "src/discipline/read.rs": "svc/terminal-service/src/discipline/read.rs",
+    "src/main.rs": "svc/terminal-service/src/main.rs",
+    "src/reactor.rs": "svc/terminal-service/src/reactor.rs",
+    "src/reactor/configuration.rs": "svc/terminal-service/src/reactor/configuration.rs",
+    "src/reactor/control.rs": "svc/terminal-service/src/reactor/control.rs",
+    "src/reactor/leases.rs": "svc/terminal-service/src/reactor/leases.rs",
+    "src/reactor/raw.rs": "svc/terminal-service/src/reactor/raw.rs",
+    "src/reactor/streams.rs": "svc/terminal-service/src/reactor/streams.rs",
+    "tests/discipline.rs": "svc/terminal-service/tests/discipline.rs",
+    "tests/formatting.rs": "svc/terminal-service/tests/formatting.rs",
+    "tests/formatting.tsv": "svc/terminal-service/tests/formatting.tsv",
+    "tests/linux-formatting.py": "svc/terminal-service/tests/linux-formatting.py"
+  },
+  "SPDX-FileCopyrightText": "2026 roolrz",
+  "SPDX-License-Identifier": "Apache-2.0",
+  "mounts": {
+    "": "svc/terminal-service"
+  },
+  "packages": [
+    "hyper-terminal-service"
+  ],
+  "tests": [
+    [
+      "make",
+      "app-test",
+      "APP_TEST_PACKAGE=hyper-terminal-service"
+    ]
+  ]
+}
