@@ -16,6 +16,10 @@
       "make",
       "app-test",
       "APP_TEST_PACKAGE=hyper-terminal-service"
+    ],
+    [
+      "python3",
+      "{component}/tests/linux-formatting.py"
     ]
   ]
 }
