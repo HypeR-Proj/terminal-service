@@ -22,7 +22,6 @@ version = "=0.0.0"
 features = ["std"]
 
 [dependencies.hyper-terminal]
-version = "=0.1.0"
 path = "../../lib/terminal"
 
 [lints]
