@@ -222,15 +222,13 @@ pub fn stream_worker(
                         }
                     }
                     Err(Error::Status(Status::TIMED_OUT))
-                    | Err(Error::ReceiveRejected(hyper_os::ReceiveRejection::Status(
-                        Status::ACCESS_DENIED | Status::BAD_HANDLE | Status::INVALID_ARGUMENT,
-                    )))
-                    | Err(Error::ReceiveRejected(hyper_os::ReceiveRejection::Capacity {
-                        ..
-                    }))
-                    | Err(Error::InvalidResponse)
-                    | Err(Error::UnexpectedObjectKind { .. }) => {}
-                    Err(_) => break,
+                    | Err(Error::ReceiveRejected(_))
+                    | Err(Error::InvalidStreamRequest) => {}
+                    Err(Error::Status(Status::PEER_CLOSED)) => break,
+                    Err(error) => {
+                        eprintln!("terminal stream listener stopped: {error}");
+                        break;
+                    }
                 }
             }
         })
