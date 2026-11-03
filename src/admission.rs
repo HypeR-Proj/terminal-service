@@ -222,12 +222,14 @@ pub fn stream_worker(
                         }
                     }
                     Err(Error::Status(Status::TIMED_OUT))
-                    | Err(Error::Status(Status::ACCESS_DENIED))
-                    | Err(Error::Status(Status::BAD_HANDLE))
-                    | Err(Error::Status(Status::INVALID_ARGUMENT))
+                    | Err(Error::ReceiveRejected(hyper_os::ReceiveRejection::Status(
+                        Status::ACCESS_DENIED | Status::BAD_HANDLE | Status::INVALID_ARGUMENT,
+                    )))
+                    | Err(Error::ReceiveRejected(hyper_os::ReceiveRejection::Capacity {
+                        ..
+                    }))
                     | Err(Error::InvalidResponse)
-                    | Err(Error::UnexpectedObjectKind { .. })
-                    | Err(Error::MessageTooLarge { .. }) => {}
+                    | Err(Error::UnexpectedObjectKind { .. }) => {}
                     Err(_) => break,
                 }
             }
