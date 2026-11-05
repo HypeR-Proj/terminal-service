@@ -4,6 +4,43 @@
 use super::*;
 
 impl Reactor {
+    pub(super) fn stage_input(&mut self, now: u64) {
+        let binary = self.terminal.binary_input();
+        if !binary {
+            self.feed_cooked_ingress(now);
+        }
+        let count = if binary && !self.terminal.control_input() {
+            self.raw_completed
+                .len()
+                .min(stream::MAX_DATA - self.ingress.len())
+        } else {
+            self.raw_completed.len()
+        };
+        if count == 0 {
+            return;
+        }
+        let mut bytes = [0; stream::MAX_DATA];
+        for (destination, source) in bytes.iter_mut().zip(self.raw_completed.drain(..count)) {
+            *destination = source;
+        }
+        if binary {
+            if self.terminal.control_input() {
+                self.terminal.scan_raw_controls(
+                    &bytes[..count],
+                    &mut self.ingress,
+                    stream::MAX_DATA,
+                );
+            } else {
+                self.ingress.extend(&bytes[..count]);
+            }
+            self.ingress_time = self.raw_completed_time;
+            self.ingress_generation = self.ingress_generation.wrapping_add(1);
+        } else {
+            self.terminal
+                .input(&bytes[..count], self.raw_completed_time);
+        }
+    }
+
     pub(super) fn feed_cooked_ingress(&mut self, now: u64) {
         let mut bytes = [0; stream::MAX_DATA];
         let count = self.ingress.len();
@@ -14,12 +51,18 @@ impl Reactor {
     }
 
     pub(super) fn arm_input(&mut self, now: u64) -> Result<()> {
-        if self.input_flush.is_some() {
+        // At most one completed raw request waits for ingress space. A mode
+        // change can disable scanning after a full-sized read was submitted;
+        // staging its completion prevents overflow without dropping raw data.
+        if self.input_flush.is_some() || !self.raw_completed.is_empty() {
             return Ok(());
         }
         let binary = self.terminal.binary_input();
+        let scan_controls = binary && self.terminal.control_input();
         let demand = if self.foreground == 0 {
             None
+        } else if scan_controls {
+            Some((stream::MAX_DATA, hyper_os::DEADLINE_INFINITE))
         } else if binary {
             self.connections.iter().find_map(|connection| {
                 if connection.lease != self.foreground
@@ -47,7 +90,11 @@ impl Reactor {
             ))
         };
         let (capacity, deadline) = demand.unwrap_or((0, hyper_os::DEADLINE_INFINITE));
-        let capacity = capacity.min(stream::MAX_DATA - self.ingress.len());
+        let capacity = if scan_controls {
+            capacity
+        } else {
+            capacity.min(stream::MAX_DATA - self.ingress.len())
+        };
         if self.raw_read_capacity != 0 {
             if !self.raw_cancel_sent
                 && (capacity == 0

@@ -97,7 +97,12 @@ impl ReadRequest {
         generation: u64,
         now_ns: u64,
     ) -> ReadDecision {
-        if available > 0 {
+        if available == 0 {
+            // An input cutoff (or another reader) can consume all observed
+            // bytes. An expired inter-byte timer must not keep waking an empty
+            // request; the next byte starts a new gap without moving its deadline.
+            self.first_seen_ns = None;
+        } else {
             if self.first_seen_ns.is_none() {
                 self.first_seen_ns = Some(now_ns);
                 self.last_byte_ns = now_ns;

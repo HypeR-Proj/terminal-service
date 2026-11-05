@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 roolrz
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{Discipline, EventFlags, Record};
+use super::{Discipline, EventFlags, Record, VecDeque};
 
 impl Discipline {
     /// Always inspect input for flow controls even when ordinary queues are
@@ -21,6 +21,10 @@ impl Discipline {
             if self.literal {
                 self.literal = false;
                 self.accept(original, true, now_ns);
+                continue;
+            }
+            if self.settings.signals && Some(original) == self.settings.controls.terminate {
+                self.terminate_input(original);
                 continue;
             }
             if self.settings.input.receive_flow_control {
@@ -57,6 +61,32 @@ impl Discipline {
             self.accept(byte, quote_newline, now_ns);
         }
         self.update_flow();
+    }
+
+    /// Scan controls without assigning ordinary raw bytes a line/read policy.
+    /// The reactor uses this only for binary input with control recognition.
+    /// A later foreground owner interprets retained typeahead under its profile.
+    pub fn scan_raw_controls(&mut self, bytes: &[u8], ingress: &mut VecDeque<u8>, limit: usize) {
+        for &byte in bytes {
+            if self.control_input() && Some(byte) == self.settings.controls.terminate {
+                ingress.clear();
+                self.terminate_input(byte);
+            } else if ingress.len() < limit {
+                ingress.push_back(byte);
+            } else {
+                // Continue scanning even if a non-reading client fills the
+                // bounded queue. Loss cannot hide a later termination request.
+                self.events.0 |= EventFlags::INPUT_LOSS;
+            }
+        }
+    }
+
+    fn terminate_input(&mut self, byte: u8) {
+        // Only queues still owned by the discipline are discarded. Data whose
+        // READ reply committed has already left these queues and is untouched.
+        self.clear_input();
+        self.events.0 |= EventFlags::TERMINATE;
+        self.echo_input(byte, false);
     }
 
     fn accept(&mut self, byte: u8, quoted: bool, now_ns: u64) {

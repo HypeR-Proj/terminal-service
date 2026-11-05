@@ -54,6 +54,145 @@ fn raw_preserves_every_byte_including_flow_and_eof() -> Result<(), CreateError> 
 }
 
 #[test]
+fn terminate_is_consumed_in_canonical_and_noncanonical_modes() -> Result<(), CreateError> {
+    for canonical in [true, false] {
+        let mut settings = Settings::raw();
+        settings.canonical = canonical;
+        settings.signals = true;
+        let mut terminal = terminal(settings)?;
+        terminal.input(b"a\x03b\n", 1);
+        assert_eq!(
+            terminal.take_events().0 & EventFlags::TERMINATE,
+            EventFlags::TERMINATE
+        );
+        assert_eq!(read(&mut terminal, 32, 2).1, b"b\n");
+        assert_eq!(terminal.take_events().0 & EventFlags::TERMINATE, 0);
+    }
+    Ok(())
+}
+
+#[test]
+fn presentation_recovery_restores_control_recognition_without_reinterpreting_data()
+-> Result<(), CreateError> {
+    let mut terminal = terminal(Settings::raw())?;
+    terminal.input(b"\x03", 1);
+    terminal
+        .configure(Settings::default())
+        .map_err(CreateError::InvalidSettings)?;
+    assert!(!terminal.binary_input());
+    assert_eq!(read(&mut terminal, 32, 2).1, b"\x03");
+    terminal.input(b"\x03", 2);
+    assert_ne!(terminal.take_events().0 & EventFlags::TERMINATE, 0);
+    assert!(read(&mut terminal, 32, 3).1.is_empty());
+    Ok(())
+}
+
+#[test]
+fn terminate_discards_only_uncommitted_prefix_and_keeps_output_and_suffix()
+-> Result<(), CreateError> {
+    for canonical in [true, false] {
+        let mut settings = Settings::raw();
+        settings.canonical = canonical;
+        settings.signals = true;
+        let mut terminal = terminal(settings)?;
+        terminal.input(b"published\n", 1);
+        let completed = read(&mut terminal, 32, 2).1;
+        terminal.write_output(b"output");
+        terminal.input(b"queued\nunfinished", 3);
+        terminal.input(b"\x03next\n", 4);
+        assert_eq!(completed, b"published\n");
+        assert_eq!(read(&mut terminal, 32, 5).1, b"next\n");
+        let mut output = [0; 32];
+        assert_eq!(terminal.output(&mut output), 6);
+        assert_eq!(&output[..6], b"output");
+    }
+    Ok(())
+}
+
+#[test]
+fn raw_control_scan_preserves_typeahead_for_the_next_canonical_owner() -> Result<(), CreateError> {
+    let mut settings = Settings::raw();
+    settings.signals = true;
+    let mut terminal = terminal(settings)?;
+    assert!(terminal.binary_input());
+    let mut ingress = std::collections::VecDeque::new();
+    terminal.scan_raw_controls(b"cat\rdata\r\x04echo AFTER\r", &mut ingress, 128);
+    assert!(!terminal.has_read_record());
+    assert_eq!(ingress.drain(..4).collect::<Vec<_>>(), b"cat\r");
+    terminal
+        .configure(Settings::default())
+        .map_err(CreateError::InvalidSettings)?;
+    terminal.input(&ingress.drain(..).collect::<Vec<_>>(), 2);
+    assert_eq!(read(&mut terminal, 32, 3).1, b"data\n");
+    assert_eq!(read(&mut terminal, 32, 4).0, ReadDecision::EndOfInput);
+    assert_eq!(read(&mut terminal, 32, 5).1, b"echo AFTER\n");
+    Ok(())
+}
+
+#[test]
+fn raw_control_scan_discards_prefix_under_backpressure_but_keeps_suffix() -> Result<(), CreateError>
+{
+    let mut settings = Settings::raw();
+    settings.signals = true;
+    let mut terminal = terminal(settings)?;
+    let mut ingress = std::collections::VecDeque::new();
+    terminal.scan_raw_controls(b"oldprefix", &mut ingress, 4);
+    assert_eq!(ingress.len(), 4);
+    terminal.scan_raw_controls(b"more\x03new", &mut ingress, 4);
+    assert_eq!(ingress.into_iter().collect::<Vec<_>>(), b"new");
+    let events = terminal.take_events().0;
+    assert_ne!(events & EventFlags::INPUT_LOSS, 0);
+    assert_ne!(events & EventFlags::TERMINATE, 0);
+    Ok(())
+}
+
+#[test]
+fn terminate_resets_empty_interbyte_wait_without_extending_its_deadline() -> Result<(), CreateError>
+{
+    let mut settings = Settings::raw();
+    settings.signals = true;
+    settings.read_policy = ReadPolicy::InterByteTimeout {
+        minimum: 4,
+        gap_ns: 5,
+    };
+    let mut terminal = terminal(settings)?;
+    let mut request = ReadRequest::new(settings, 8, 1, 100);
+    let mut bytes = [0; 8];
+    terminal.input(b"ab", 2);
+    assert_eq!(
+        request.poll(&terminal, 2, &mut bytes),
+        ReadDecision::Pending
+    );
+    assert_eq!(request.next_deadline(), 7);
+    terminal.input(b"\x03", 3);
+    assert_eq!(
+        request.poll(&terminal, 8, &mut bytes),
+        ReadDecision::Pending
+    );
+    assert_eq!(request.next_deadline(), 100);
+    terminal.input(b"c", 9);
+    assert_eq!(
+        request.poll(&terminal, 9, &mut bytes),
+        ReadDecision::Pending
+    );
+    assert_eq!(request.next_deadline(), 14);
+    Ok(())
+}
+
+#[test]
+fn terminate_remains_visible_when_input_is_full_and_is_literal_when_quoted()
+-> Result<(), CreateError> {
+    let mut terminal = terminal(Settings::default())?;
+    terminal.input(b"\x16\x03\n", 1);
+    assert_eq!(terminal.take_events().0 & EventFlags::TERMINATE, 0);
+    assert_eq!(read(&mut terminal, 32, 2).1, b"\x03\n");
+    terminal.input(&vec![b'a'; Limits::default().input_bytes + 1], 3);
+    terminal.input(b"\x03\x03", 4);
+    assert_ne!(terminal.take_events().0 & EventFlags::TERMINATE, 0);
+    Ok(())
+}
+
+#[test]
 fn literal_next_bypasses_conversion_delimiter_and_flow() -> Result<(), CreateError> {
     let mut terminal = terminal(Settings::default())?;
     terminal.input(b"\x16\r\x16\n\x16\x13\n", 1);
