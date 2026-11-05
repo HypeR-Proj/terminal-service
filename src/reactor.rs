@@ -24,19 +24,35 @@ use crate::admission::{self, ControlRequest, PreparedHandles, Publisher, Work};
 use crate::discipline::{Discipline, Limits, ReadDecision, ReadRequest};
 
 const MAX_LEASES: usize = 8;
-const MAX_CONNECTIONS: usize = 24;
+// A 32-stage pipeline retains one terminal stderr connection per worker,
+// first-stage stdin and final-stage stdout, plus the supervising shell's stdio.
+const MAX_CONNECTIONS: usize = 40;
+const MAX_WAIT_ITEMS: usize = MAX_CONNECTIONS + MAX_LEASES * 2 + 5;
+const _: () = assert!(MAX_WAIT_ITEMS <= hyper_os::wait::MAX_ITEMS);
 
 struct Lease {
     id: u64,
     parent: u64,
     alive: Arc<AtomicBool>,
-    owner: Option<OwnedHandle<ProcessObject>>,
+    lifetime: LeaseLifetime,
     activated: bool,
     startup_output_remaining: usize,
     settings: Settings,
     events: OwnedHandle<ByteChannelObject>,
     event_flags: u32,
     presentation: u64,
+}
+
+enum LeaseLifetime {
+    Unbound,
+    Process(OwnedHandle<ProcessObject>),
+    Job {
+        supervisor: OwnedHandle<ByteChannelObject>,
+        presentation_owner: Option<OwnedHandle<ProcessObject>>,
+        restore_presentation: bool,
+        pending: bool,
+        next_sequence: u64,
+    },
 }
 
 struct Connection {
@@ -113,6 +129,8 @@ struct Reactor {
     raw_output: stream::Connection,
     raw_control: stream::Connection,
     ingress: VecDeque<u8>,
+    raw_completed: VecDeque<u8>,
+    raw_completed_time: u64,
     ingress_time: u64,
     ingress_generation: u64,
     raw_sample_generation: u64,
@@ -166,6 +184,8 @@ pub fn run(startup: &mut Startup<'_>) -> Result<()> {
         raw_output,
         raw_control,
         ingress: VecDeque::new(),
+        raw_completed: VecDeque::new(),
+        raw_completed_time: 0,
         ingress_time: 0,
         ingress_generation: 0,
         raw_sample_generation: 0,
@@ -189,6 +209,10 @@ pub fn run(startup: &mut Startup<'_>) -> Result<()> {
     };
     reactor
         .ingress
+        .try_reserve_exact(stream::MAX_DATA)
+        .map_err(|_| Error::Status(Status::NO_MEMORY))?;
+    reactor
+        .raw_completed
         .try_reserve_exact(stream::MAX_DATA)
         .map_err(|_| Error::Status(Status::NO_MEMORY))?;
     reactor
@@ -270,12 +294,11 @@ impl Reactor {
         {
             match result {
                 stream::ReadResult::Data(count) if self.input_flush.is_none() => {
-                    if count > stream::MAX_DATA - self.ingress.len() {
+                    if !self.raw_completed.is_empty() {
                         return Err(Error::InvalidResponse);
                     }
-                    self.ingress.extend(&input[..count]);
-                    self.ingress_time = now;
-                    self.ingress_generation = self.ingress_generation.wrapping_add(1);
+                    self.raw_completed.extend(&input[..count]);
+                    self.raw_completed_time = now;
                     self.raw_sample_generation = self.raw_sample_generation.wrapping_add(1);
                 }
                 stream::ReadResult::TimedOut => {
@@ -293,9 +316,14 @@ impl Reactor {
         self.finish_raw()?;
         self.finish_input_flush()?;
         self.configure_progress(now)?;
-        if self.foreground != 0 && self.input_flush.is_none() && !self.terminal.binary_input() {
-            self.feed_cooked_ingress(now);
+        self.recover_job_presentations()?;
+        if self.foreground != 0 && self.input_flush.is_none() {
+            self.stage_input(now);
         }
+        // Input acquires its lease/profile when staged, after configuration
+        // commits. Publish its control event before exposing later input bytes.
+        self.publish_terminal_events();
+        self.deliver_termination()?;
         let mut index = 0;
         while index < self.connections.len() {
             if self.service_connection(index, now).is_err() {
@@ -309,13 +337,11 @@ impl Reactor {
         }
         self.arm_input(now)?;
         self.submit_raw()?;
-        let flags = self.terminal.take_events().0;
-        if flags != 0 {
-            self.notify(flags);
-        }
+        self.publish_terminal_events();
+        self.deliver_termination()?;
         let mut items = Vec::new();
         items
-            .try_reserve_exact(MAX_CONNECTIONS + MAX_LEASES + 5)
+            .try_reserve_exact(MAX_WAIT_ITEMS)
             .map_err(|_| Error::Status(Status::NO_MEMORY))?;
         items.push(self.raw_input.wait_item());
         items.push(WaitItem::new(
@@ -390,11 +416,30 @@ impl Reactor {
             }
         }
         for lease in &self.leases {
-            if let Some(owner) = &lease.owner {
-                items.push(WaitItem::new(
+            match &lease.lifetime {
+                LeaseLifetime::Process(owner) => items.push(WaitItem::new(
                     owner.as_handle_ref(),
                     ObjectSignals::<ProcessObject>::TERMINATED,
-                ));
+                )),
+                LeaseLifetime::Job {
+                    supervisor,
+                    presentation_owner,
+                    pending,
+                    ..
+                } => {
+                    let mut signals = ObjectSignals::<ByteChannelObject>::PEER_CLOSED;
+                    if *pending {
+                        signals = signals.union(ObjectSignals::<ByteChannelObject>::WRITABLE);
+                    }
+                    items.push(WaitItem::new(supervisor.as_handle_ref(), signals));
+                    if let Some(owner) = presentation_owner {
+                        items.push(WaitItem::new(
+                            owner.as_handle_ref(),
+                            ObjectSignals::<ProcessObject>::TERMINATED,
+                        ));
+                    }
+                }
+                LeaseLifetime::Unbound => {}
             }
         }
         match wait_many(&items, deadline) {

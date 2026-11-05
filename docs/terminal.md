@@ -5,7 +5,7 @@
 
 The formal environment provides terminal behavior through a userspace service.
 It uses Native capabilities and messages, not Linux termios structures, ioctl
-numbers, signals or process-group semantics. Guest UART emulation is separate.
+numbers or kernel signal dispositions. Guest UART emulation is separate.
 
 ## Service boundaries
 
@@ -100,6 +100,18 @@ scalar erase, and LF-to-CRLF output conversion. Configurable controls include
 EOF, erase, line kill, word erase, literal next, reprint and an extra line
 terminator. A disabled control is distinct from a control assigned to NUL.
 
+`signals` independently enables `controls.terminate` (Ctrl+C by default).
+Recognition consumes that character and emits a foreground-only termination
+request, including in noncanonical mode and when ordinary input queues are full.
+Literal-next quotes it. Recognition discards input still owned by terminal queues
+before the character, including unfinished canonical edits and unread raw input.
+Bytes after it are retained, even in the same transport packet. Already committed
+READ replies and buffered output are unaffected; the event does not roll back an
+accepted read. An emptied inter-byte wait restarts its gap on the next byte while
+retaining its original absolute deadline.
+Applications or their supervisors decide how to respond. No process is killed
+by terminal-service.
+
 EOF after a partial line makes those bytes readable without adding another EOF
 record. EOF on an empty line produces one zero-length read; later reads still
 work. Overlong canonical lines are discarded through their delimiter and report
@@ -131,8 +143,8 @@ bounded queue with space reserved for echo. Echo overflow reports loss and does
 not advance the column for bytes that were not queued.
 
 `Settings::raw()` makes both directions binary-transparent, including NUL, ESC,
-CR, Ctrl-D, XON and XOFF. It disables canonical processing, echo, transformations
-and both software-flow directions. Editors and display tools should explicitly
+CR, Ctrl-C, Ctrl-D, XON and XOFF. It disables control events, canonical processing,
+echo, transformations and both software-flow directions. Editors and display tools should explicitly
 select their required profile rather than assume the shell's settings.
 
 Noncanonical reads use an explicit policy:
@@ -190,15 +202,24 @@ before restoring the surviving parent once, including asynchronous flow-profile
 recovery. Size and coalesced terminal events have a separate control/event
 interface.
 
-The lease follows its observed Process or an explicit launcher release. Closing
+For `prepare_child()` / `bind_child()`, the lease follows its observed Process or an explicit launcher release. Closing
 the optional control handle does not invalidate standard streams during runtime
 cleanup. A launcher must release a prepared child after a failed launch.
 
-Binary input with no echo, conversion or software flow is pulled only for an
-outstanding read. A bounded ingress buffer retains any untouched bytes from an
-in-flight transport request across foreground changes; the next owner's profile
-processes them once. Already processed logical records are never reinterpreted.
-This preserves pasted input when a raw shell starts a canonical command.
+Binary input with no control events, echo, conversion or software flow is pulled
+only for an outstanding read. Enabling control recognition adds an independent
+scan: Ctrl+C remains detectable without a reader, while ordinary raw bytes stay
+untouched until consumed or interpreted by the next foreground profile. A full
+scan queue reports input loss and continues recognizing controls.
+
+Raw ingress and one completed raw request each have a bounded buffer. A completed
+request that cannot fit after control scanning is disabled waits for ingress space;
+no further raw request is submitted until that completion is staged. This avoids
+overflow when settings change with an earlier large raw read outstanding. Input
+acquires its foreground lease and profile when processed after configuration
+commit, not when an upstream read is submitted. Generated events keep that lease
+identity. Already processed logical records are never reinterpreted. This preserves
+pasted input when a raw shell starts a canonical command.
 
 `hyper_terminal::Terminal::take` obtains optional scoped control from startup.
 Ordinary data uses `std::io`. `hyper_os::stream::ProcessInput` exposes the same
@@ -207,11 +228,46 @@ process-owned stdin connection for event-driven clients such as `top` and
 closes its private connection, preventing its reply from becoming a later
 reader's result.
 
-An interactive shell prepares one canonical foreground lease for a pipeline.
-Every unredirected terminal stream uses that lease; the last stage alone receives
-control/events and owns the lease through its Process observer. An upstream
-producer exiting does not revoke the consumer's keyboard access. This is pipeline
-ownership, not a Unix process group or job-control implementation.
+An interactive shell uses `prepare_job()` / `bind_job()` for one canonical
+foreground lease per pipeline. Every unredirected terminal stream uses that
+lease; the last stage alone receives application control/events. The shell
+retains the independent `JobEvents` endpoint that owns the lease. Neither an
+upstream producer nor the final consumer exiting revokes the remaining job's
+terminal streams. The final consumer's WAIT-only observer tracks presentation:
+its exit restores the default profile and display baseline through the existing
+flow-control transaction and ends its configuration authority, so a dead raw-mode
+consumer cannot disable Ctrl+C for surviving members. Closing the supervisor endpoint or explicitly releasing the
+lease revokes it, and ancestor revocation still retires the entire lease subtree.
+
+Termination requests for a job go only to its supervisor endpoint as bounded
+records containing a never-reused lease ID and increasing sequence. Requests
+may coalesce under backpressure; a slow supervisor never blocks the terminal
+reactor. The shell selects the job members and each parent applies its own
+disposition. The terminal neither enumerates processes nor terminates TaskGroups.
+For ordinary Process-owned foreground leases, the same input sets only that
+lease's `EventFlags::TERMINATE`, never the flags of background parents. General
+resize and configuration notifications retain their broadcast behavior.
+
+For a Process-owned lease, termination cancels its uncommitted input requests
+until `take_events()` acknowledges the event. Before acknowledging, the service
+drains already queued input submissions under that cancellation boundary. This
+keeps post-control typeahead behind the cancellation, even though events and
+input replies use different channels. A committed READ reply remains owned by
+the caller. The event consumer must coordinate its readers: stop submitting new
+reads while acknowledging termination, then resume after applying cancellation
+to its application state. Concurrent submissions on separate channels have no
+global ordering guarantee. Job leases do not cancel application reads; their
+parent supervisor decides how to handle termination.
+
+Acknowledgement never waits for an input reply consumer. Its per-stream drain
+is limited to 64 frames; a stream flooding stale cancellation frames is closed
+locally without blocking the event acknowledgement or other connections.
+
+A terminal admits at most 40 private stream connections across eight leases.
+This accommodates a 32-stage shell pipeline's retained stderr connections,
+its input/output endpoints and the supervising shell. The reactor's worst-case
+wait set is checked at compile time against the kernel limit, including both
+the supervisor endpoint and presentation observer of every job lease.
 
 The last stage also receives the optional `client::STREAM` connector.
 `Terminal::open_input()` opens a private keyboard connection on the same lease,

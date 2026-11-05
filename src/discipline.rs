@@ -132,8 +132,9 @@ impl Discipline {
         self.settings
     }
 
-    /// No input policy has consumed or transformed these physical bytes. The
-    /// service can retain typeahead until the next explicit read/foreground.
+    /// Ordinary input stays untouched until the next explicit read/foreground.
+    /// Enabled control characters can be scanned without assigning other bytes
+    /// a line or read policy.
     #[must_use]
     pub fn binary_input(&self) -> bool {
         let settings = self.settings;
@@ -147,6 +148,11 @@ impl Discipline {
             && !settings.input.lowercase
             && !settings.input.receive_flow_control
             && !settings.input.send_flow_control
+    }
+
+    #[must_use]
+    pub fn control_input(&self) -> bool {
+        self.settings.signals && self.settings.controls.terminate.is_some()
     }
 
     /// Installs prevalidated settings without reparsing buffered logical bytes.

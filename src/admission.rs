@@ -47,6 +47,7 @@ pub struct PreparedHandles {
     pub stream: Option<OwnedHandle<CapabilityChannelObject>>,
     pub control: Option<OwnedHandle<CapabilityChannelObject>>,
     pub events: Option<OwnedHandle<ByteChannelObject>>,
+    pub supervisor: Option<OwnedHandle<ByteChannelObject>>,
 }
 
 pub struct ControlReply {
@@ -153,7 +154,11 @@ pub fn control_worker(
                 };
                 if header.status != 0
                     || message.bytes().len() != protocol::HEADER_BYTES + expected
-                    || message.capability_count() != usize::from(header.operation == protocol::BIND)
+                    || message.capability_count()
+                        != usize::from(matches!(
+                            header.operation,
+                            protocol::BIND | protocol::BIND_JOB
+                        ))
                 {
                     break;
                 }
@@ -256,6 +261,7 @@ fn send_reply(
     };
     while alive.load(Ordering::Acquire) {
         let result = if let Some(prepared) = reply.prepared.as_mut() {
+            let supervised = prepared.supervisor.is_some();
             let mut offers = [
                 CapabilityDisposition::move_handle(
                     &mut prepared.stream,
@@ -270,7 +276,16 @@ fn send_reply(
                     RightsOffer::Exact(EVENT_RIGHTS),
                 )?,
             ];
-            listener.try_send(&bytes[..length], &mut offers)
+            if supervised {
+                let supervisor = CapabilityDisposition::move_handle(
+                    &mut prepared.supervisor,
+                    RightsOffer::Exact(EVENT_RIGHTS),
+                )?;
+                let [stream, control, events] = offers;
+                listener.try_send(&bytes[..length], &mut [stream, control, events, supervisor])
+            } else {
+                listener.try_send(&bytes[..length], &mut offers)
+            }
         } else {
             listener.try_send(&bytes[..length], &mut [])
         };

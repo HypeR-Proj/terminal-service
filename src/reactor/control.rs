@@ -8,7 +8,18 @@ impl Reactor {
         let operation = request.header.operation;
         let lease_id = request.lease;
         let managed = lease_id == 0;
-        let active = managed || self.foreground == lease_id;
+        let active = managed
+            || (self.foreground == lease_id
+                && !self.leases.iter().any(|lease| {
+                    lease.id == lease_id
+                        && matches!(
+                            lease.lifetime,
+                            LeaseLifetime::Job {
+                                presentation_owner: None,
+                                ..
+                            }
+                        )
+                }));
         if !managed && !self.leases.iter().any(|lease| lease.id == lease_id) {
             request.respond(Status::CANCELLED, 0, None, None);
             return Ok(());
@@ -27,11 +38,13 @@ impl Reactor {
             return Ok(());
         }
         match operation {
-            protocol::PREPARE if active => match self.prepare(lease_id) {
-                Ok((id, handles)) => request.respond(Status::OK, id, None, Some(handles)),
-                Err(Error::Status(status)) => request.respond(status, 0, None, None),
-                Err(_) => request.respond(Status::INTERNAL, 0, None, None),
-            },
+            protocol::PREPARE | protocol::PREPARE_JOB if active => {
+                match self.prepare(lease_id, operation == protocol::PREPARE_JOB) {
+                    Ok((id, handles)) => request.respond(Status::OK, id, None, Some(handles)),
+                    Err(Error::Status(status)) => request.respond(status, 0, None, None),
+                    Err(_) => request.respond(Status::INTERNAL, 0, None, None),
+                }
+            }
             protocol::BIND if active => {
                 if self.configuration.is_some() || self.input_flush.is_some() {
                     request.respond(Status::BUSY, 0, None, None);
@@ -39,7 +52,9 @@ impl Reactor {
                 }
                 let id = request.header.value;
                 let index = self.leases.iter().position(|lease| {
-                    lease.id == id && lease.parent == lease_id && lease.owner.is_none()
+                    lease.id == id
+                        && lease.parent == lease_id
+                        && matches!(lease.lifetime, LeaseLifetime::Unbound)
                 });
                 if let (Some(index), Some(owner)) = (index, request.observer.take()) {
                     let terminated = owner.as_process_supervisor().wait_terminated(0).is_ok();
@@ -50,10 +65,35 @@ impl Reactor {
                         self.revoke(id)?;
                         request.respond(Status::OK, 0, None, None);
                     } else {
-                        self.leases[index].owner = Some(owner);
+                        self.leases[index].lifetime = LeaseLifetime::Process(owner);
                         let settings = self.leases[index].settings;
                         self.begin_configuration(Some(request), id, settings, false)?;
                     }
+                } else {
+                    request.respond(Status::BAD_STATE, 0, None, None);
+                }
+            }
+            protocol::BIND_JOB if active => {
+                if self.configuration.is_some() || self.input_flush.is_some() {
+                    request.respond(Status::BUSY, 0, None, None);
+                    return Ok(());
+                }
+                let id = request.header.value;
+                let lease = self.leases.iter_mut().find(|lease| {
+                    lease.id == id
+                        && lease.parent == lease_id
+                        && !lease.activated
+                        && matches!(lease.lifetime, LeaseLifetime::Job { .. })
+                });
+                if let (Some(lease), Some(observer)) = (lease, request.observer.take()) {
+                    if let LeaseLifetime::Job {
+                        presentation_owner, ..
+                    } = &mut lease.lifetime
+                    {
+                        *presentation_owner = Some(observer);
+                    }
+                    let settings = lease.settings;
+                    self.begin_configuration(Some(request), id, settings, false)?;
                 } else {
                     request.respond(Status::BAD_STATE, 0, None, None);
                 }
@@ -115,6 +155,15 @@ impl Reactor {
                 }
             }
             protocol::TAKE_EVENTS => {
+                if self.local_input_cutoff(lease_id) {
+                    // Control requests are dispatched before stream requests.
+                    // Cancel reads already queued on the other channel before
+                    // acknowledging the cutoff, so suffix bytes cannot win.
+                    self.fence_local_input(
+                        lease_id,
+                        hyper_os::time::monotonic_now()?.as_nanoseconds(),
+                    );
+                }
                 let events = self
                     .leases
                     .iter_mut()

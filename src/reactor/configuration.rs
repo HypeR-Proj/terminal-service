@@ -160,6 +160,7 @@ impl Reactor {
         header.status()?;
         self.terminal.clear_input();
         self.ingress.clear();
+        self.raw_completed.clear();
         if let Some(flush) = self.input_flush.take() {
             flush.request.respond(Status::OK, 0, None, None);
         }
